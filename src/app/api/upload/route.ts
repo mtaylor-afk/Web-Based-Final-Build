@@ -1,11 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { writeFile, mkdir } from "fs/promises";
-import path from "path";
 
 // Supported types
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic"];
 const MAX_SIZE_MB = 10;
+
+async function storeFile(file: File, parentType: string, parentId: string): Promise<string> {
+  const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+  const bytes = await file.arrayBuffer();
+  const buffer = Buffer.from(bytes);
+
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    // Vercel Blob — production
+    const { put } = await import("@vercel/blob");
+    const blob = await put(`uploads/${parentType}/${parentId}/${safeName}`, buffer, {
+      access: "public",
+      contentType: file.type,
+    });
+    return blob.url;
+  }
+
+  // Local filesystem — development
+  const { writeFile, mkdir } = await import("fs/promises");
+  const path = await import("path");
+  const uploadDir = path.join(process.cwd(), "public", "uploads", parentType, parentId);
+  await mkdir(uploadDir, { recursive: true });
+  await writeFile(path.join(uploadDir, safeName), buffer);
+  return `/uploads/${parentType}/${parentId}/${safeName}`;
+}
 
 export async function POST(request: NextRequest) {
   const formData = await request.formData();
@@ -25,52 +47,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `File too large. Maximum size is ${MAX_SIZE_MB}MB.` }, { status: 400 });
   }
 
-  // Create upload directory
-  const uploadDir = path.join(process.cwd(), "public", "uploads", parentType, parentId);
-  await mkdir(uploadDir, { recursive: true });
+  const fileUrl = await storeFile(file, parentType, parentId);
 
-  // Write file
-  const bytes = await file.arrayBuffer();
-  const buffer = Buffer.from(bytes);
-  const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-  const filePath = path.join(uploadDir, safeName);
-  await writeFile(filePath, buffer);
-
-  const fileUrl = `/uploads/${parentType}/${parentId}/${safeName}`;
-
-  // Persist to the correct attachment table and update hasImages flag
   let attachment;
   if (parentType === "quote") {
     attachment = await prisma.quoteAttachment.create({
-      data: {
-        quoteId: parentId,
-        fileName: file.name,
-        mimeType: file.type,
-        fileUrl,
-        fileSize: file.size,
-      },
+      data: { quoteId: parentId, fileName: file.name, mimeType: file.type, fileUrl, fileSize: file.size },
     });
     await prisma.quote.update({ where: { id: parentId }, data: { hasImages: true } });
   } else if (parentType === "invoice") {
     attachment = await prisma.invoiceAttachment.create({
-      data: {
-        invoiceId: parentId,
-        fileName: file.name,
-        mimeType: file.type,
-        fileUrl,
-        fileSize: file.size,
-      },
+      data: { invoiceId: parentId, fileName: file.name, mimeType: file.type, fileUrl, fileSize: file.size },
     });
     await prisma.invoice.update({ where: { id: parentId }, data: { hasImages: true } });
   } else if (parentType === "signoff") {
     attachment = await prisma.signOffAttachment.create({
-      data: {
-        signOffId: parentId,
-        fileName: file.name,
-        mimeType: file.type,
-        fileUrl,
-        fileSize: file.size,
-      },
+      data: { signOffId: parentId, fileName: file.name, mimeType: file.type, fileUrl, fileSize: file.size },
     });
     await prisma.projectSignOff.update({ where: { id: parentId }, data: { hasImages: true } });
   } else {
