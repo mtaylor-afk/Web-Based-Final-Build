@@ -1,0 +1,230 @@
+// WV Construction — Prisma Schema
+// SQLite for dev / PostgreSQL-compatible design
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+
+model Settings {
+  id                   String   @id @default(cuid())
+  companyDisplayName   String   @default("WV Construction")
+  companyLegalName     String   @default("ACOR Building and Property Solutions Ltd")
+  companyReg           String   @default("9287377")
+  tradingAs            String   @default("WV Construction")
+  defaultTerms         String   @default("Payment is due within 14 days of invoice date. We reserve the right to charge interest on late payments at 8% above the Bank of England base rate.")
+  defaultPaymentTerms  String   @default("30% deposit required before works commence. 70% on completion.")
+  quotePrefix          String   @default("WVC-Q-")
+  invoicePrefix        String   @default("WVC-I-")
+  signOffPrefix        String   @default("WVC-S-")
+  aiProvider           String   @default("openai")
+  aiModel              String   @default("gpt-4o")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+// ─── Client ──────────────────────────────────────────────────────────────────
+
+model Client {
+  id          String   @id @default(cuid())
+  fullName    String
+  companyName String?
+  address     String
+  email       String?
+  phone       String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  quotes    Quote[]
+  invoices  Invoice[]
+  signOffs  ProjectSignOff[]
+  visuals   SavedVisual[]
+}
+
+// ─── Quote ───────────────────────────────────────────────────────────────────
+
+model Quote {
+  id          String   @id @default(cuid())
+  ref         String   @unique
+  date        DateTime
+  title       String?
+  address     String
+  status      String   @default("draft")
+  notes       String?
+  exclusions  String?
+  assumptions String?
+  terms       String?
+  subtotal    Decimal  @default(0)
+  total       Decimal  @default(0)
+  hasImages   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  lineItems       QuoteLineItem[]
+  attachments     QuoteAttachment[]
+  invoices        Invoice[]
+  visuals         SavedVisual[]
+  signOffs        ProjectSignOff[]
+}
+
+model QuoteLineItem {
+  id          String  @id @default(cuid())
+  description String
+  quantity    Decimal @default(1)
+  unit        String?
+  unitPrice   Decimal @default(0)
+  total       Decimal @default(0)
+  sortOrder   Int     @default(0)
+
+  quoteId String
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+}
+
+model QuoteAttachment {
+  id        String   @id @default(cuid())
+  fileName  String
+  mimeType  String
+  fileUrl   String
+  fileSize  Int?
+  createdAt DateTime @default(now())
+
+  quoteId String
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+}
+
+// ─── Invoice ─────────────────────────────────────────────────────────────────
+
+model Invoice {
+  id           String   @id @default(cuid())
+  ref          String   @unique
+  date         DateTime
+  address      String
+  notes        String?
+  paymentTerms String?
+  subtotal     Decimal  @default(0)
+  total        Decimal  @default(0)
+  hasImages    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  sourceQuoteId String?
+  sourceQuote   Quote?  @relation(fields: [sourceQuoteId], references: [id])
+
+  lineItems   InvoiceLineItem[]
+  attachments InvoiceAttachment[]
+  signOffs    ProjectSignOff[]
+}
+
+model InvoiceLineItem {
+  id          String  @id @default(cuid())
+  description String
+  quantity    Decimal @default(1)
+  unit        String?
+  unitPrice   Decimal @default(0)
+  total       Decimal @default(0)
+  sortOrder   Int     @default(0)
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+model InvoiceAttachment {
+  id        String   @id @default(cuid())
+  fileName  String
+  mimeType  String
+  fileUrl   String
+  fileSize  Int?
+  createdAt DateTime @default(now())
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+// ─── Project Sign-Off ─────────────────────────────────────────────────────────
+
+model ProjectSignOff {
+  id             String    @id @default(cuid())
+  ref            String    @unique
+  address        String
+  summary        String?
+  notes          String?
+  completionDate DateTime?
+  hasImages      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  relatedQuoteId String?
+  relatedQuote   Quote?   @relation(fields: [relatedQuoteId], references: [id])
+
+  relatedInvoiceId String?
+  relatedInvoice   Invoice? @relation(fields: [relatedInvoiceId], references: [id])
+
+  attachments SignOffAttachment[]
+}
+
+model SignOffAttachment {
+  id        String   @id @default(cuid())
+  fileName  String
+  mimeType  String
+  fileUrl   String
+  fileSize  Int?
+  createdAt DateTime @default(now())
+
+  signOffId String
+  signOff   ProjectSignOff @relation(fields: [signOffId], references: [id], onDelete: Cascade)
+}
+
+// ─── Saved Visual ─────────────────────────────────────────────────────────────
+
+model SavedVisual {
+  id        String   @id @default(cuid())
+  type      String   // "inspiration_board" | "visualisation"
+  title     String?
+  prompt    String?
+  imageUrl  String
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  quoteId String?
+  quote   Quote?  @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+}
+
+// ─── Rates Library ────────────────────────────────────────────────────────────
+
+model RatesLibrary {
+  id          String   @id @default(cuid())
+  category    String
+  name        String
+  defaultUnit String?
+  defaultCost Decimal  @default(0)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ─── Counters (for sequential reference generation) ──────────────────────────
+
+model RefCounter {
+  id      String @id
+  current Int    @default(1000)
+}
